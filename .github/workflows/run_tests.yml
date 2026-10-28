@@ -2,8 +2,11 @@ name: Run tests
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [ main ]
+    inputs:
+      test-filter:
+        description: "Jasmine --filter regex to run a subset of specs (empty = full suite)"
+        required: false
+        default: ""
 
 env:
   package_dir: "/"
@@ -11,6 +14,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,10 +30,19 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Pack tarball
+        run: npm pack
+      - name: Upload package tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: ./baseline-browser-mapping-*.tgz
+          if-no-files-found: error
 
   test-matrix:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         node-version: [6, 8, 10, 12, 14, 16, 18, 20, 22, 24]
@@ -44,6 +57,8 @@ jobs:
           name: dist
           path: dist
       - name: Run tests
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
         run: |
           NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
           echo "Running on Node $NODE_MAJOR"
@@ -53,6 +68,11 @@ jobs:
           else
             echo "Running full test suite..."
             npm ci
-            npm run test:jasmine
-            npm run test:jasmine-browser
+            if [ -n "${{ inputs.test-filter }}" ]; then
+              npx jasmine --filter="$TEST_FILTER"
+              npx jasmine-browser-runner runSpecs --config ./spec/support/jasmine-browser.js --filter="$TEST_FILTER"
+            else
+              npm run test:jasmine
+              npm run test:jasmine-browser
+            fi
           fi
